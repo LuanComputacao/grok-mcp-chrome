@@ -13,7 +13,7 @@ Linux e Windows. Não instala Node, Chrome nem o Grok — só configura o Grok e
 | Camada | O que vai para a outra máquina | Efeito |
 |---|---|---|
 | **Servidor MCP** | bloco em `~/.grok/config.toml` | JPEG pequeno, cap de 256 KB, pin `1.8.0`, sem traces/telemetria, timeouts curtos, `--autoConnect` |
-| **Agente** | skill `~/.grok/skills/grok-mcp-chrome/` | 1 `search_tool`, `fill_form`, `waitForStableDom: false`, sem PNG/snapshot em todo click |
+| **Agente** | skill `~/.grok/skills/grok-mcp-chrome/` | probe de stack; curl/`fetch` vs browser; snapshot para achar elemento; **screenshot obrigatório** em QA de layout |
 
 O que **não** viaja (é da máquina destino):
 
