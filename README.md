@@ -1,64 +1,192 @@
 # grok-mcp-chrome
 
-Instalador do [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp) no **Grok**, com o perfil rápido usado para tarefas no Chrome (clicar, preencher, ler DOM, screenshot leve).
+Instalador do [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp) no **Grok**, com o perfil rápido para tarefas no Chrome (clicar, preencher, ler DOM, screenshot de layout).
 
-Linux e Windows. Não instala Node, Chrome nem o Grok — só configura o Grok e instala a skill de uso.
+O instalador **verifica os pré-requisitos** e depois só configura o Grok (config.toml + skill). Ele **não** baixa Node, Chrome nem o Grok — essas instalações estão documentadas abaixo.
+
+Linux (`install.sh`) e Windows (`install.ps1`).
 
 ## A pergunta essencial
 
 **Se eu instalar isto em outra máquina, as ações no Chrome já saem otimizadas?**
 
-**Sim, as duas camadas viajam com o `./install.sh` / `install.ps1`:**
+**Sim**, desde que o preflight passe. As duas camadas viajam no `./install.sh` / `install.ps1`:
 
 | Camada | O que vai para a outra máquina | Efeito |
 |---|---|---|
 | **Servidor MCP** | bloco em `~/.grok/config.toml` | JPEG pequeno, cap de 256 KB, pin `1.8.0`, sem traces/telemetria, timeouts curtos, `--autoConnect` |
 | **Agente** | skill `~/.grok/skills/grok-mcp-chrome/` | probe de stack; curl/`fetch` vs browser; snapshot para achar elemento; **screenshot obrigatório** em QA de layout |
 
-O que **não** viaja (é da máquina destino):
+O que **não** viaja: Chrome 144+, Node/`npx` e Grok (têm de existir na máquina destino). Depois da instalação ainda falta ligar o remote debugging e clicar **Allow**.
 
-- Chrome 144+, Node/`npx`, Grok já instalados
-- Remote debugging ligado (`chrome://inspect/#remote-debugging`) e o **Allow** na primeira conexão
-- Poucas abas no Chrome (dezenas de abas deixam o `--autoConnect` lento, independente deste repo)
+`--slim` **não** é usado: tira `click` / `fill` / `take_snapshot`.
 
-`--slim` **não** é usado: ele tira `click` / `fill` / `take_snapshot` e quebra o fluxo real.
+---
 
-## Pré-requisitos na máquina destino
+## Pré-requisitos
 
-- Grok CLI/TUI
-- Node.js LTS + `npx`
-- Chrome **144+** (stable)
+O instalador exige isto **antes** de gravar (use `--check` / `-Check` para só testar). `--force` / `-Force` ignora a falha (o MCP pode não subir).
 
-## Instalar
+| Item | Mínimo | Para quê |
+|---|---|---|
+| **Python 3** | 3.x no PATH (`python3`) | Só Linux: mesclar o TOML. Windows usa PowerShell. |
+| **Node.js** | major **≥ 20** (LTS 20 ou 22) | O Grok spawna o MCP via `npx`. |
+| **npx** | o que vem com o Node | `npx -y chrome-devtools-mcp@1.8.0`. |
+| **Google Chrome** | **≥ 144** (canal stable) | `--autoConnect`. Chromium antigo não serve. |
+| **Grok CLI/TUI** | `grok` no PATH ou `~/.grok/bin/grok` | Destino da config e da skill. |
+| **Git** | qualquer | Só para `git clone` deste repo. |
+
+`--uninstall` no Linux só exige Python 3.
+
+---
+
+## Instalar os pré-requisitos
+
+### Linux
+
+**Git** (Debian/Ubuntu / Fedora):
+
+```bash
+sudo apt update && sudo apt install -y git python3
+# ou: sudo dnf install git python3
+```
+
+**Node.js LTS** (nvm — evita o Node velho do `apt`):
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.7/install.sh | bash
+# feche e abra o terminal, ou: source ~/.bashrc   (zsh: source ~/.zshrc)
+nvm install --lts
+nvm use --lts
+node -v    # v20.x ou v22.x
+npx -v
+```
+
+**Google Chrome stable** (Debian/Ubuntu amd64; o `.deb` já adiciona o apt do Google):
+
+```bash
+cd /tmp
+curl -fsSLO https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+sudo apt install -y ./google-chrome-stable_current_amd64.deb
+google-chrome-stable --version   # major ≥ 144
+```
+
+Fedora:
+
+```bash
+sudo dnf install -y fedora-workstation-repositories
+sudo dnf config-manager --set-enabled google-chrome
+sudo dnf install -y google-chrome-stable
+```
+
+Download oficial: https://www.google.com/chrome/
+
+**Grok** ([docs](https://docs.x.ai)):
+
+```bash
+curl -fsSL https://x.ai/cli/install.sh | bash
+# garanta ~/.grok/bin no PATH (o installer costuma acrescentar)
+grok --version
+```
+
+Na primeira execução, `grok` abre o browser para autenticar em grok.com.
+
+### Windows
+
+1. **Git for Windows** — https://git-scm.com/download/win (inclui Git Bash se quiser o fluxo Linux).
+2. **Node.js LTS** — https://nodejs.org/ → *Windows Installer (.msi)* LTS → next/next. **Reabra** o PowerShell.
+   ```powershell
+   node -v
+   npx -v
+   ```
+3. **Google Chrome** — https://www.google.com/chrome/ → instalador oficial.
+   Confira em `chrome://version` (major ≥ 144).
+4. **Grok** (PowerShell):
+   ```powershell
+   irm https://x.ai/cli/install.ps1 | iex
+   grok --version
+   ```
+   O installer coloca `%USERPROFILE%\.grok\bin` no PATH do usuário. Reabra o terminal se `grok` não aparecer.
+
+---
+
+## Instalar o grok-mcp-chrome
+
+### Linux
 
 ```bash
 git clone https://github.com/LuanComputacao/grok-mcp-chrome.git
 cd grok-mcp-chrome
 chmod +x install.sh
-./install.sh --dry-run
+
+./install.sh --check      # só preflight; exit 1 se faltar algo
+./install.sh --dry-run    # preflight + diff do config.toml
+./install.sh              # grava config + skill
+```
+
+Atualizar (já clonado):
+
+```bash
+git pull
 ./install.sh
 ```
 
-Windows (PowerShell):
+Desinstalar:
+
+```bash
+./install.sh --uninstall
+```
+
+`$GROK_HOME` sobrescreve o destino (padrão `~/.grok`).
+
+### Windows (PowerShell)
+
+Pode ser necessário, nesta sessão:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+```
 
 ```powershell
 git clone https://github.com/LuanComputacao/grok-mcp-chrome.git
 cd grok-mcp-chrome
-Set-ExecutionPolicy -Scope Process Bypass
+
+.\install.ps1 -Check
 .\install.ps1 -DryRun
 .\install.ps1
 ```
 
-`$GROK_HOME` / `$env:GROK_HOME` apontam o destino (padrão `~/.grok` ou `%USERPROFILE%\.grok`).
+Atualizar: `git pull` e `.\install.ps1`.  
+Desinstalar: `.\install.ps1 -Uninstall`.
 
-Desinstalar: `./install.sh --uninstall` (remove o bloco `chrome-devtools` e a skill; **mantém** `[mcp] max_output_bytes`).
+`$env:GROK_HOME` sobrescreve o destino (padrão `%USERPROFILE%\.grok`).
 
-## Depois de instalar
+O Grok no Windows resolve `npx.cmd` via `PATHEXT`; o TOML usa `command = "npx"` nos dois sistemas.
 
-1. Chrome aberto, **poucas abas**.
-2. `chrome://inspect/#remote-debugging` → Remote Debugging.
+### Flags
+
+| Linux | Windows | Efeito |
+|---|---|---|
+| `--check` | `-Check` | Só verifica pré-requisitos |
+| `--dry-run` | `-DryRun` | Preflight + preview; não grava |
+| `--force` | `-Force` | Grava mesmo com preflight falho |
+| `--uninstall` | `-Uninstall` | Remove bloco chrome-devtools e a skill; **mantém** `[mcp] max_output_bytes` |
+| `--help` | `-Help` | Ajuda |
+
+Backup automático: `config.toml.bak.<timestamp>`. Outros MCP servers no arquivo não são alterados.
+
+---
+
+## Depois de instalar (obrigatório para `--autoConnect`)
+
+1. Chrome 144+ aberto, **poucas abas** (dezenas de abas deixam o attach lento).
+2. `chrome://inspect/#remote-debugging` → ligar Remote Debugging.
 3. Primeira tool do Grok → **Allow**.
 4. Reiniciar o Grok, ou `/mcps` → `r`.
+
+Salvar `config.toml` já dispara hot-reload (respawna o MCP).
+
+---
 
 ## O que o config grava
 
@@ -86,12 +214,13 @@ tool_timeout_sec = 45
 tool_timeouts = { take_screenshot = 30, wait_for = 25 }
 ```
 
-Outros MCP servers no `config.toml` não são alterados. Backup: `config.toml.bak.<timestamp>`.
+---
 
-## Testes
+## Testes (desenvolvimento)
 
 ```bash
 python3 test_merge.py
+./install.sh --check
 ```
 
 ## Licença

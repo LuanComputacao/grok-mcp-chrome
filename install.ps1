@@ -1,17 +1,23 @@
 # Instala o Chrome DevTools MCP otimizado + skill no Grok (Windows).
-# Não instala Node nem Chrome. Não mexe em outros MCP servers.
+# Não instala Node, Chrome nem o Grok. Não mexe em outros MCP servers.
 [CmdletBinding()]
 param(
+    [switch]$Check,
     [switch]$DryRun,
+    [switch]$Force,
     [switch]$Uninstall,
     [switch]$Help
 )
 
 $ErrorActionPreference = "Stop"
 $PackageVersion = "1.8.0"
+$MinChromeMajor = 144
+$MinNodeMajor = 20
 $MaxOutputBytes = "262144"
+$DocsUrl = "https://github.com/LuanComputacao/grok-mcp-chrome#pré-requisitos"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SkillSrc = Join-Path $ScriptDir "skill\grok-mcp-chrome"
+$script:PreFail = $false
 
 $ChromeBlock = @"
 [mcp_servers.chrome-devtools]
@@ -41,22 +47,32 @@ CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS = "1"
 
 function Show-Usage {
     @"
-Uso: install.ps1 [-DryRun] [-Uninstall] [-Help]
+Uso: install.ps1 [-Check] [-DryRun] [-Force] [-Uninstall] [-Help]
 
-1. Grava [mcp_servers.chrome-devtools] em `$env:USERPROFILE\.grok\config.toml
-2. Copia a skill para `$env:USERPROFILE\.grok\skills\grok-mcp-chrome\
+1. Verifica pré-requisitos (Node ≥$MinNodeMajor, npx, Chrome ≥$MinChromeMajor, Grok)
+2. Grava [mcp_servers.chrome-devtools] em `$env:USERPROFILE\.grok\config.toml
+3. Copia a skill para `$env:USERPROFILE\.grok\skills\grok-mcp-chrome\
 
-  -DryRun      mostra o preview sem gravar
+  -Check       só o preflight; não grava nada (exit 1 se faltar algo)
+  -DryRun      preflight + preview, não grava
+  -Force       grava mesmo se o preflight falhar
   -Uninstall   remove o bloco chrome-devtools e a skill (mantém [mcp])
   -Help        esta ajuda
 
-Pré-requisitos (este script NÃO instala): Node.js + npx, Chrome 144+, Grok
+Este script NÃO instala Node/Chrome/Grok. Instruções: README.md
+  $DocsUrl
 "@
 }
 
 if ($Help) {
     Show-Usage
     exit 0
+}
+
+function Write-Ok([string]$msg) { Write-Host "  [ok]   $msg" }
+function Write-Fail([string]$msg) {
+    Write-Warning "  [FAIL] $msg"
+    $script:PreFail = $true
 }
 
 function Strip-ChromeBlocks([string]$src) {
@@ -129,6 +145,107 @@ function Find-Chrome {
     return $null
 }
 
+function Get-ChromeMajor([string]$path) {
+    try {
+        $v = (Get-Item -LiteralPath $path).VersionInfo.ProductVersion
+        if ($v) { return [int]($v.Split('.')[0]) }
+    }
+    catch { }
+    return 0
+}
+
+function Find-Grok([string]$grokHome) {
+    $cmd = Get-Command grok -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    $candidates = @(
+        (Join-Path $grokHome "bin\grok.exe"),
+        (Join-Path $grokHome "bin\grok"),
+        (Join-Path $env:USERPROFILE ".grok\bin\grok.exe")
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path -LiteralPath $c) { return $c }
+    }
+    return $null
+}
+
+function Invoke-Preflight([string]$grokHome, [bool]$isUninstall) {
+    $script:PreFail = $false
+    Write-Host "==> Preflight (pré-requisitos)"
+    Write-Host ""
+
+    if ($isUninstall) {
+        Write-Ok "PowerShell — merge TOML nativo (uninstall não exige Node/Chrome/Grok)"
+        Write-Host ""
+        Write-Host "Preflight OK (modo uninstall)."
+        Write-Host ""
+        return $true
+    }
+
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    if ($nodeCmd) {
+        $nv = & node -v
+        $major = [int](($nv -replace '[^0-9].*', ''))
+        if ($major -ge $MinNodeMajor) {
+            Write-Ok "node $nv ($($nodeCmd.Source))"
+        }
+        else {
+            Write-Fail "node $nv — precisa major ≥ $MinNodeMajor (LTS 20/22)."
+            Write-Host "         https://nodejs.org/  (Windows Installer LTS)"
+        }
+    }
+    else {
+        Write-Fail "node ausente no PATH."
+        Write-Host "         https://nodejs.org/  → LTS → msiexec; reabra o terminal."
+    }
+
+    $npxCmd = Get-Command npx -ErrorAction SilentlyContinue
+    if ($npxCmd) {
+        Write-Ok "npx $($npxCmd.Source)"
+    }
+    else {
+        Write-Fail "npx ausente (vem com o Node.js; o Grok spawna npx -y chrome-devtools-mcp@$PackageVersion)."
+    }
+
+    $chrome = Find-Chrome
+    if ($chrome) {
+        $cm = Get-ChromeMajor $chrome
+        if ($cm -ge $MinChromeMajor) {
+            Write-Ok "chrome $cm ($chrome) — autoConnect exige ≥ $MinChromeMajor"
+        }
+        else {
+            Write-Fail "chrome $cm em $chrome — precisa ≥ $MinChromeMajor."
+            Write-Host "         https://www.google.com/chrome/"
+        }
+    }
+    else {
+        Write-Fail "Google Chrome não encontrado."
+        Write-Host "         https://www.google.com/chrome/"
+    }
+
+    $grokBin = Find-Grok $grokHome
+    if ($grokBin) {
+        $gv = ""
+        try { $gv = (& $grokBin --version 2>$null | Select-Object -First 1) } catch { }
+        Write-Ok "grok $(if ($gv) { $gv } else { 'ok' }) ($grokBin)"
+    }
+    else {
+        Write-Fail "Grok CLI não encontrado (PATH nem $grokHome\bin\grok.exe)."
+        Write-Host "         irm https://x.ai/cli/install.ps1 | iex"
+    }
+
+    Write-Host ""
+    if ($script:PreFail) {
+        Write-Host "Preflight FALHOU. Instale os itens [FAIL] (README) e rode de novo."
+        Write-Host "Docs: $DocsUrl"
+        Write-Host "Ou:   .\install.ps1 -Force   (grava mesmo assim — o MCP pode não subir)"
+        Write-Host ""
+        return $false
+    }
+    Write-Host "Preflight OK."
+    Write-Host ""
+    return $true
+}
+
 $grokHome = if ($env:GROK_HOME) { $env:GROK_HOME } else { Join-Path $env:USERPROFILE ".grok" }
 $config = Join-Path $grokHome "config.toml"
 $skillDst = Join-Path $grokHome "skills\grok-mcp-chrome"
@@ -139,24 +256,18 @@ Write-Host "    skill:  $skillDst"
 Write-Host "    pacote: chrome-devtools-mcp@$PackageVersion"
 Write-Host ""
 
-$missing = $false
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    Write-Warning "node não encontrado no PATH."
-    $missing = $true
+$preOk = Invoke-Preflight $grokHome $Uninstall.IsPresent
+if (-not $preOk) {
+    if ($Check) { exit 1 }
+    if (-not $Force) { exit 1 }
+    Write-Host "-Force: seguindo mesmo com preflight falho."
+    Write-Host ""
 }
-if (-not (Get-Command npx -ErrorAction SilentlyContinue)) {
-    Write-Warning "npx não encontrado no PATH."
-    $missing = $true
+
+if ($Check) {
+    Write-Host "Só -Check; nada gravado."
+    exit 0
 }
-$chrome = Find-Chrome
-if ($chrome) {
-    Write-Host "Chrome: $chrome"
-}
-else {
-    Write-Warning "Chrome não encontrado. Precisa Chrome 144+ para --autoConnect."
-    $missing = $true
-}
-Write-Host ""
 
 $original = ""
 if (Test-Path -LiteralPath $config) {
@@ -222,7 +333,7 @@ Write-Host ""
 
 @"
 Próximos passos (--autoConnect):
-  1. Chrome 144+ aberto, poucas abas.
+  1. Chrome $MinChromeMajor+ aberto, poucas abas.
   2. chrome://inspect/#remote-debugging -> ligar Remote Debugging.
   3. Primeira tool do Grok -> Allow.
   4. Reiniciar o Grok, ou /mcps -> r.
@@ -230,9 +341,4 @@ Próximos passos (--autoConnect):
 Camadas instaladas: flags MCP (config.toml) + playbook do agente (skill).
 O Grok no Windows resolve npx.cmd via PATHEXT; command = "npx" está correto.
 "@
-
-if ($missing) {
-    Write-Host ""
-    Write-Host "Há avisos de pré-requisito acima. Config/skill foram gravados mesmo assim."
-}
 exit 0
