@@ -6,7 +6,7 @@ set -euo pipefail
 PACKAGE_VERSION="1.8.0"
 MIN_CHROME_MAJOR=144
 MIN_NODE_MAJOR=20
-DOCS_URL="https://github.com/LuanComputacao/grok-mcp-chrome#pré-requisitos"
+DOCS_URL="https://github.com/LuanComputacao/grok-mcp-chrome#comece-aqui"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MERGER="$SCRIPT_DIR/merge_grok_chrome_mcp.py"
 SKILL_SRC="$SCRIPT_DIR/skill/grok-mcp-chrome"
