@@ -27,17 +27,17 @@ Se o passo 2 imprimir `[FAIL]`, **não pule**. Instale o item que faltou e rode 
 
 Copie **na ordem**. Feche e abra o terminal depois do nvm e depois do Grok, se o comando não aparecer.
 
-**Git + Python 3** (Debian/Ubuntu):
+**Git** (Debian/Ubuntu):
 
 ```bash
 sudo apt update
-sudo apt install -y git python3
+sudo apt install -y git
 ```
 
 Fedora:
 
 ```bash
-sudo dnf install -y git python3
+sudo dnf install -y git
 ```
 
 **Node.js LTS** (não use o `nodejs` velho do `apt`):
@@ -79,7 +79,6 @@ Na primeira vez, `grok` abre o browser para entrar em grok.com.
 ### 2. Conferir no Linux
 
 ```bash
-python3 --version          # qualquer 3.x
 node -v                    # v20.x ou v22.x (major ≥ 20)
 npx -v
 google-chrome-stable --version   # major ≥ 144
@@ -164,7 +163,7 @@ grok --version
 
 Chrome: abra o browser → `chrome://version` → o número grande no topo deve ser **144** ou mais.
 
-Não precisa de Python no Windows (o merge do TOML é feito no PowerShell).
+O merge do TOML no Linux usa o **mesmo Node** do `npx`. No Windows o merge é PowerShell. Nenhum dos dois pede Python.
 
 ### 3. Instalar este repositório (Windows)
 
@@ -206,7 +205,6 @@ O instalador **não grava nada** enquanto houver `[FAIL]` (salvo `--force` / `-F
 
 | Mensagem | O que fazer |
 |---|---|
-| `python3 ausente` | Só Linux: `sudo apt install python3` |
 | `node ausente` / major &lt; 20 | Instale LTS (nvm no Linux, MSI no Windows). Reabra o terminal. |
 | `npx ausente` | Reinstale o Node (o npx vem junto). |
 | `Google Chrome não encontrado` / versão &lt; 144 | Instale o Chrome stable em https://www.google.com/chrome/ |
@@ -282,7 +280,7 @@ tool_timeouts = { take_screenshot = 30, wait_for = 25 }
 ## Desenvolvimento
 
 ```bash
-python3 test_merge.py
+node test_merge.js
 ./install.sh --check
 ```
 

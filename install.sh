@@ -8,14 +8,14 @@ MIN_CHROME_MAJOR=144
 MIN_NODE_MAJOR=20
 DOCS_URL="https://github.com/LuanComputacao/grok-mcp-chrome#comece-aqui"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MERGER="$SCRIPT_DIR/merge_grok_chrome_mcp.py"
+MERGER="$SCRIPT_DIR/merge_grok_chrome_mcp.js"
 SKILL_SRC="$SCRIPT_DIR/skill/grok-mcp-chrome"
 
 usage() {
   cat <<EOF
 Uso: $(basename "$0") [--check] [--dry-run] [--force] [--uninstall] [--help]
 
-1. Verifica pré-requisitos (Python 3, Node ≥${MIN_NODE_MAJOR}, npx, Chrome ≥${MIN_CHROME_MAJOR}, Grok)
+1. Verifica pré-requisitos (Node ≥${MIN_NODE_MAJOR}, npx, Chrome ≥${MIN_CHROME_MAJOR}, Grok)
 2. Grava [mcp_servers.chrome-devtools] em \$GROK_HOME/config.toml
 3. Copia a skill para \$GROK_HOME/skills/grok-mcp-chrome/
 
@@ -108,25 +108,6 @@ preflight() {
   echo "==> Preflight (pré-requisitos)"
   echo
 
-  if have python3; then
-    ok "python3 $(python3 -V 2>&1 | awk '{print $2}') — merge do config.toml"
-  else
-    fail "python3 ausente (necessário para mesclar o TOML)."
-    echo "         Linux: sudo apt install python3    # Debian/Ubuntu"
-    echo "                sudo dnf install python3    # Fedora"
-  fi
-
-  if [[ "$UNINSTALL" -eq 1 ]]; then
-    echo
-    if [[ "$PRE_FAIL" -eq 1 ]]; then
-      echo "Preflight FALHOU (python3). --uninstall precisa dele para mesclar o TOML."
-      return 1
-    fi
-    echo "Preflight OK (modo uninstall)."
-    echo
-    return 0
-  fi
-
   if have node; then
     local nm
     nm="$(node_major)"
@@ -142,9 +123,20 @@ preflight() {
   fi
 
   if have npx; then
-    ok "npx $(command -v npx)"
+    ok "npx $(command -v npx) — também mescla o config.toml"
   else
     fail "npx ausente (vem com o Node.js; o Grok spawna npx -y chrome-devtools-mcp@${PACKAGE_VERSION})."
+  fi
+
+  if [[ "$UNINSTALL" -eq 1 ]]; then
+    echo
+    if [[ "$PRE_FAIL" -eq 1 ]]; then
+      echo "Preflight FALHOU. --uninstall precisa do Node para mesclar o TOML."
+      return 1
+    fi
+    echo "Preflight OK (modo uninstall)."
+    echo
+    return 0
   fi
 
   local chrome_bin major
@@ -224,9 +216,9 @@ fi
 new_file="$(mktemp)"
 trap 'rm -f "$new_file"' EXIT
 if [[ -f "$CONFIG" ]]; then
-  python3 "$MERGER" "${merge_args[@]}" "$CONFIG" > "$new_file"
+  node "$MERGER" "${merge_args[@]}" "$CONFIG" > "$new_file"
 else
-  python3 "$MERGER" "${merge_args[@]}" </dev/null > "$new_file"
+  node "$MERGER" "${merge_args[@]}" </dev/null > "$new_file"
 fi
 
 config_changed=1
