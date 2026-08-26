@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 "use strict";
-/** Merge or strip [mcp_servers.chrome-devtools] in a Grok config.toml. */
+/**
+ * Merge or strip [mcp_servers.chrome-devtools] in a Grok config.toml.
+ * Line-anchored table edits so comments/strings containing the name are left alone.
+ */
 
 const fs = require("fs");
 
@@ -13,6 +16,8 @@ args = [
     "-y",
     "chrome-devtools-mcp@${PACKAGE_VERSION}",
     "--autoConnect",
+    "--page-id-routing",
+    "--redact-network-headers",
     "--no-category-performance",
     "--no-performance-crux",
     "--no-usage-statistics",
@@ -20,7 +25,6 @@ args = [
     "--screenshot-quality=60",
     "--screenshot-max-width=1280",
     "--screenshot-max-height=768",
-    "--allow-unrestricted-paths",
 ]
 startup_timeout_sec = 45
 tool_timeout_sec = 45
@@ -32,41 +36,77 @@ CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS = "1"
 CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS = "1"
 `;
 
+const TABLE_CHROME = /^\[mcp_servers\.chrome-devtools(?:\.[^\]]+)?\][ \t]*$/;
+const TABLE_ANY = /^\[/;
+const TABLE_MCP = /^\[mcp\][ \t]*$/;
+
+function normalize(src) {
+  return String(src)
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+}
+
 function stripChrome(src) {
-  return src.replace(
-    /\n?\[mcp_servers\.chrome-devtools(?:\.[^\]]+)?\][\s\S]*?(?=\n\[|$)/g,
-    "\n",
-  );
+  const lines = normalize(src).split("\n");
+  const out = [];
+  let skipping = false;
+  for (const line of lines) {
+    if (TABLE_CHROME.test(line)) {
+      skipping = true;
+      continue;
+    }
+    if (skipping) {
+      if (TABLE_ANY.test(line) && !TABLE_CHROME.test(line)) {
+        skipping = false;
+        out.push(line);
+      }
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n");
 }
 
 function upsertMcpMax(src, value) {
-  const m = src.match(/^\[mcp\][ \t]*\n/m);
-  if (!m) {
-    return `[mcp]\nmax_output_bytes = ${value}\n\n` + src.replace(/^\s+/, "");
+  const lines = normalize(src).split("\n");
+  let mcpStart = -1;
+  let mcpEnd = lines.length;
+  for (let i = 0; i < lines.length; i++) {
+    if (TABLE_MCP.test(lines[i])) {
+      mcpStart = i;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (TABLE_ANY.test(lines[j])) {
+          mcpEnd = j;
+          break;
+        }
+      }
+      break;
+    }
   }
-  const start = m.index + m[0].length;
-  const rest = src.slice(start);
-  const n = rest.match(/^\[/m);
-  const end = n ? start + n.index : src.length;
-  const head = src.slice(0, m.index);
-  let section = src.slice(m.index, end);
-  const tail = src.slice(end);
-  if (/^max_output_bytes\s*=/m.test(section)) {
-    section = section.replace(
-      /^max_output_bytes\s*=\s*\S+/m,
-      `max_output_bytes = ${value}`,
-    );
-  } else {
-    section = section.replace(
-      /^(\[mcp\][ \t]*\n)/m,
-      `$1max_output_bytes = ${value}\n`,
-    );
+  if (mcpStart < 0) {
+    const body = src.replace(/^\s+/, "");
+    return `[mcp]\nmax_output_bytes = ${value}\n\n` + body;
   }
-  return head + section.replace(/\s+$/, "") + "\n\n" + tail.replace(/^\s+/, "");
+  const head = lines.slice(0, mcpStart);
+  const section = lines.slice(mcpStart, mcpEnd);
+  const tail = lines.slice(mcpEnd);
+  let replaced = false;
+  const next = section.map((line) => {
+    if (/^max_output_bytes\s*=/.test(line)) {
+      replaced = true;
+      return `max_output_bytes = ${value}`;
+    }
+    return line;
+  });
+  if (!replaced) {
+    next.splice(1, 0, `max_output_bytes = ${value}`);
+  }
+  return [...head, ...next, ...tail].join("\n");
 }
 
 function collapseBlank(src) {
-  let text = src.replace(/\n{3,}/g, "\n\n");
+  let text = normalize(src).replace(/\n{3,}/g, "\n\n");
   if (text && !text.endsWith("\n")) text += "\n";
   return text;
 }
@@ -94,7 +134,12 @@ function parseArgs(argv) {
     if (a === "--uninstall") out.uninstall = true;
     else if (a === "--print-block") out.printBlock = true;
     else if (a === "--max-output-bytes") {
-      out.maxBytes = rest[++i];
+      const v = rest[++i];
+      if (!v) {
+        console.error("--max-output-bytes exige um número");
+        process.exit(2);
+      }
+      out.maxBytes = v;
     } else if (a.startsWith("-")) {
       console.error(`Flag desconhecida: ${a}`);
       process.exit(2);

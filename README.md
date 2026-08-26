@@ -19,6 +19,8 @@ Faça **nesta ordem**:
 
 Se o passo 2 imprimir `[FAIL]`, **não pule**. Instale o item que faltou e rode `--check` / `-Check` de novo.
 
+**Privacidade:** `--autoConnect` liga o Grok no **Chrome da sua vida** (todas as abas). O que o MCP devolve (snapshot, print, Network) vai para a API xAI. Feche banco, e-mail e gov se não forem o alvo. O diálogo **Allow** do Chrome é o único clique de consentimento.
+
 ---
 
 ## Linux — do zero até funcionar
@@ -201,7 +203,7 @@ Mesmos 5 passos da [secção Linux](#4-ligar-o-chrome-no-grok-linux-e-windows).
 
 ## Se o preflight falhar
 
-O instalador **não grava nada** enquanto houver `[FAIL]` (salvo `--force` / `-Force`, que não é o caminho normal).
+O instalador **não grava nada** enquanto houver `[FAIL]`. `--force` ainda **exige Node**, grava os arquivos e sai **exit 1** (`MCP NÃO VALIDADO`). Não é o caminho normal.
 
 | Mensagem | O que fazer |
 |---|---|
@@ -227,8 +229,8 @@ Conferir de novo:
 | Linux | Windows | O que faz |
 |---|---|---|
 | `--check` | `-Check` | Só preflight. Exit 1 se faltar algo. |
-| `--dry-run` | `-DryRun` | Preflight + preview do `config.toml`. Não grava. |
-| `--force` | `-Force` | Grava mesmo com `[FAIL]` (o MCP pode não subir). |
+| `--dry-run` | `-DryRun` | Preflight + preview do **bloco chrome** (não dumpa o resto do TOML). Não grava. |
+| `--force` | `-Force` | Grava mesmo com Chrome/Grok ausentes; **exige Node**. Exit **1** no fim. |
 | `--uninstall` | `-Uninstall` | Remove o bloco `chrome-devtools` e a skill. Mantém `[mcp] max_output_bytes`. |
 | `--help` | `-Help` | Ajuda. |
 
@@ -251,16 +253,17 @@ O `config.toml` existente ganha backup `config.toml.bak.<datahora>`. Stitch, Git
 
 Bloco gravado:
 
-```toml
-[mcp]
-max_output_bytes = 262144
+O bloco canônico (gerado por `node merge_grok_chrome_mcp.js --print-block`):
 
+```toml
 [mcp_servers.chrome-devtools]
 command = "npx"
 args = [
     "-y",
     "chrome-devtools-mcp@1.8.0",
     "--autoConnect",
+    "--page-id-routing",
+    "--redact-network-headers",
     "--no-category-performance",
     "--no-performance-crux",
     "--no-usage-statistics",
@@ -268,12 +271,20 @@ args = [
     "--screenshot-quality=60",
     "--screenshot-max-width=1280",
     "--screenshot-max-height=768",
-    "--allow-unrestricted-paths",
 ]
 startup_timeout_sec = 45
 tool_timeout_sec = 45
 tool_timeouts = { take_screenshot = 30, wait_for = 25 }
+enabled = true
+
+[mcp_servers.chrome-devtools.env]
+CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS = "1"
+CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS = "1"
 ```
+
+Também sobe `[mcp] max_output_bytes = 262144` (**global**, vale para todos os MCP). Writes do MCP ficam no temp do SO (sem `--allow-unrestricted-paths`). Headers de Authorization/Cookie são redigidos antes de ir ao modelo.
+
+Perfil Chrome **dedicado** (`--browser-url` + outro `--user-data-dir`) evita attach no Chrome do dia-a-dia, mas **não** é o default — exige login de novo. Não misture com `--autoConnect`.
 
 ---
 
@@ -283,6 +294,8 @@ tool_timeouts = { take_screenshot = 30, wait_for = 25 }
 node test_merge.js
 ./install.sh --check
 ```
+
+O Windows usa o **mesmo** `merge_grok_chrome_mcp.js` (não há segundo merger em PowerShell).
 
 ## Licença
 

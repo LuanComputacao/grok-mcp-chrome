@@ -1,5 +1,5 @@
 # Instala o Chrome DevTools MCP otimizado + skill no Grok (Windows).
-# Não instala Node, Chrome nem o Grok. Não mexe em outros MCP servers.
+# Merge TOML: o mesmo merge_grok_chrome_mcp.js do Linux (exige Node).
 [CmdletBinding()]
 param(
     [switch]$Check,
@@ -12,55 +12,30 @@ param(
 $ErrorActionPreference = "Stop"
 $PackageVersion = "1.8.0"
 $MinChromeMajor = 144
+$WarnChromeMajor = 149
 $MinNodeMajor = 20
-$MaxOutputBytes = "262144"
 $DocsUrl = "https://github.com/LuanComputacao/grok-mcp-chrome#comece-aqui"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Merger = Join-Path $ScriptDir "merge_grok_chrome_mcp.js"
 $SkillSrc = Join-Path $ScriptDir "skill\grok-mcp-chrome"
 $script:PreFail = $false
-
-$ChromeBlock = @"
-[mcp_servers.chrome-devtools]
-command = "npx"
-args = [
-    "-y",
-    "chrome-devtools-mcp@$PackageVersion",
-    "--autoConnect",
-    "--no-category-performance",
-    "--no-performance-crux",
-    "--no-usage-statistics",
-    "--screenshot-format=jpeg",
-    "--screenshot-quality=60",
-    "--screenshot-max-width=1280",
-    "--screenshot-max-height=768",
-    "--allow-unrestricted-paths",
-]
-startup_timeout_sec = 45
-tool_timeout_sec = 45
-tool_timeouts = { take_screenshot = 30, wait_for = 25 }
-enabled = true
-
-[mcp_servers.chrome-devtools.env]
-CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS = "1"
-CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS = "1"
-"@
 
 function Show-Usage {
     @"
 Uso: install.ps1 [-Check] [-DryRun] [-Force] [-Uninstall] [-Help]
 
-1. Verifica pré-requisitos (Node ≥$MinNodeMajor, npx, Chrome ≥$MinChromeMajor, Grok)
-2. Grava [mcp_servers.chrome-devtools] em `$env:USERPROFILE\.grok\config.toml
+1. Verifica Node ≥$MinNodeMajor, npx, Google Chrome ≥$MinChromeMajor, Grok
+2. Grava [mcp_servers.chrome-devtools] via node merge_grok_chrome_mcp.js
 3. Copia a skill para `$env:USERPROFILE\.grok\skills\grok-mcp-chrome\
 
-  -Check       só o preflight; não grava nada (exit 1 se faltar algo)
-  -DryRun      preflight + preview, não grava
-  -Force       grava mesmo se o preflight falhar
+  -Check       só o preflight; exit 1 se faltar algo
+  -DryRun      preflight + preview do bloco chrome; não grava
+  -Force       grava mesmo com Chrome/Grok ausentes; ainda exige Node.
+               exit 1 no fim (MCP não validado)
   -Uninstall   remove o bloco chrome-devtools e a skill (mantém [mcp])
   -Help        esta ajuda
 
-Este script NÃO instala Node/Chrome/Grok. Instruções: README.md
-  $DocsUrl
+README: $DocsUrl
 "@
 }
 
@@ -71,65 +46,10 @@ if ($Help) {
 
 function Write-Ok([string]$msg) { Write-Host "  [ok]   $msg" }
 function Write-Fail([string]$msg) {
-    Write-Warning "  [FAIL] $msg"
+    Write-Warning "[FAIL] $msg"
     $script:PreFail = $true
 }
-
-function Strip-ChromeBlocks([string]$src) {
-    return [regex]::Replace(
-        $src,
-        "(?ms)\n?\[mcp_servers\.chrome-devtools(?:\.[^\]]+)?\][\s\S]*?(?=\n\[|\z)",
-        "`n"
-    )
-}
-
-function Upsert-McpMax([string]$src, [string]$value) {
-    $m = [regex]::Match($src, "(?m)^\[mcp\][ \t]*\n")
-    if (-not $m.Success) {
-        return "[mcp]`nmax_output_bytes = $value`n`n" + $src.TrimStart()
-    }
-    $start = $m.Index + $m.Length
-    $n = [regex]::Match($src.Substring($start), "(?m)^\[")
-    $end = if ($n.Success) { $start + $n.Index } else { $src.Length }
-    $head = $src.Substring(0, $m.Index)
-    $section = $src.Substring($m.Index, $end - $m.Index)
-    $tail = $src.Substring($end)
-    if ($section -match "(?m)^max_output_bytes\s*=") {
-        $section = [regex]::Replace(
-            $section,
-            "(?m)^max_output_bytes\s*=\s*\S+",
-            "max_output_bytes = $value",
-            1
-        )
-    }
-    else {
-        $section = [regex]::Replace(
-            $section,
-            "(?m)^(\[mcp\][ \t]*\n)",
-            "`$1max_output_bytes = $value`n",
-            1
-        )
-    }
-    return $head + $section.TrimEnd() + "`n`n" + $tail.TrimStart()
-}
-
-function Collapse-Blank([string]$src) {
-    $text = [regex]::Replace($src, "`n{3,}", "`n`n")
-    if ($text.Length -gt 0 -and -not $text.EndsWith("`n")) {
-        $text += "`n"
-    }
-    return $text
-}
-
-function Merge-Config([string]$src, [bool]$doUninstall) {
-    $text = Strip-ChromeBlocks $src
-    if ($doUninstall) {
-        return (Collapse-Blank ($text.TrimEnd() + "`n"))
-    }
-    $text = Upsert-McpMax $text $MaxOutputBytes
-    $text = $text.TrimEnd() + "`n`n" + $ChromeBlock.Trim() + "`n"
-    return (Collapse-Blank $text)
-}
+function Write-WarnLine([string]$msg) { Write-Host "  [warn] $msg" }
 
 function Find-Chrome {
     $candidates = @(
@@ -140,17 +60,21 @@ function Find-Chrome {
     foreach ($c in $candidates) {
         if ($c -and (Test-Path -LiteralPath $c)) { return $c }
     }
-    $cmd = Get-Command chrome -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
     return $null
 }
 
 function Get-ChromeMajor([string]$path) {
     try {
         $v = (Get-Item -LiteralPath $path).VersionInfo.ProductVersion
-        if ($v) { return [int]($v.Split('.')[0]) }
+        if ($v -and ($v -match '^(\d+)')) { return [int]$Matches[1] }
     }
     catch { }
+    return 0
+}
+
+function Get-NodeMajor {
+    $nv = & node -v
+    if ($nv -match '(\d+)') { return [int]$Matches[1] }
     return 0
 }
 
@@ -173,29 +97,31 @@ function Invoke-Preflight([string]$grokHome, [bool]$isUninstall) {
     Write-Host "==> Preflight (pré-requisitos)"
     Write-Host ""
 
-    if ($isUninstall) {
-        Write-Ok "PowerShell — merge TOML nativo (uninstall não exige Node/Chrome/Grok)"
-        Write-Host ""
-        Write-Host "Preflight OK (modo uninstall)."
-        Write-Host ""
-        return $true
-    }
-
     $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
     if ($nodeCmd) {
         $nv = & node -v
-        $major = [int](($nv -replace '[^0-9].*', ''))
+        $major = Get-NodeMajor
         if ($major -ge $MinNodeMajor) {
-            Write-Ok "node $nv ($($nodeCmd.Source))"
+            Write-Ok "node $nv — merge TOML + npx do MCP"
         }
         else {
             Write-Fail "node $nv — precisa major ≥ $MinNodeMajor (LTS 20/22)."
-            Write-Host "         https://nodejs.org/  (Windows Installer LTS)"
         }
     }
     else {
         Write-Fail "node ausente no PATH."
-        Write-Host "         https://nodejs.org/  → LTS → msiexec; reabra o terminal."
+        Write-Host "         https://nodejs.org/  → LTS MSI; reabra o terminal."
+    }
+
+    if ($isUninstall) {
+        Write-Host ""
+        if ($script:PreFail) {
+            Write-Host "Preflight FALHOU. -Uninstall precisa do Node para mesclar o TOML."
+            return $false
+        }
+        Write-Host "Preflight OK (modo uninstall)."
+        Write-Host ""
+        return $true
     }
 
     $npxCmd = Get-Command npx -ErrorAction SilentlyContinue
@@ -203,17 +129,20 @@ function Invoke-Preflight([string]$grokHome, [bool]$isUninstall) {
         Write-Ok "npx $($npxCmd.Source)"
     }
     else {
-        Write-Fail "npx ausente (vem com o Node.js; o Grok spawna npx -y chrome-devtools-mcp@$PackageVersion)."
+        Write-Fail "npx ausente (vem com o Node.js)."
     }
 
     $chrome = Find-Chrome
     if ($chrome) {
         $cm = Get-ChromeMajor $chrome
         if ($cm -ge $MinChromeMajor) {
-            Write-Ok "chrome $cm ($chrome) — autoConnect exige ≥ $MinChromeMajor"
+            Write-Ok "Google Chrome $cm ($chrome)"
+            if ($cm -lt $WarnChromeMajor) {
+                Write-WarnLine "Chrome $cm < $WarnChromeMajor: abas discarded podem dar timeout. Atualize o Chrome."
+            }
         }
         else {
-            Write-Fail "chrome $cm em $chrome — precisa ≥ $MinChromeMajor."
+            Write-Fail "Chrome $cm — autoConnect precisa ≥ $MinChromeMajor."
             Write-Host "         https://www.google.com/chrome/"
         }
     }
@@ -235,15 +164,18 @@ function Invoke-Preflight([string]$grokHome, [bool]$isUninstall) {
 
     Write-Host ""
     if ($script:PreFail) {
-        Write-Host "Preflight FALHOU. Instale os itens [FAIL] (README) e rode de novo."
-        Write-Host "Docs: $DocsUrl"
-        Write-Host "Ou:   .\install.ps1 -Force   (grava mesmo assim — o MCP pode não subir)"
+        Write-Host "Preflight FALHOU. Instale os [FAIL] e rode de novo. Docs: $DocsUrl"
         Write-Host ""
         return $false
     }
     Write-Host "Preflight OK."
     Write-Host ""
     return $true
+}
+
+if (-not (Test-Path -LiteralPath $Merger)) {
+    Write-Error "Merger ausente: $Merger"
+    exit 1
 }
 
 $grokHome = if ($env:GROK_HOME) { $env:GROK_HOME } else { Join-Path $env:USERPROFILE ".grok" }
@@ -256,11 +188,17 @@ Write-Host "    skill:  $skillDst"
 Write-Host "    pacote: chrome-devtools-mcp@$PackageVersion"
 Write-Host ""
 
+$dirty = $false
 $preOk = Invoke-Preflight $grokHome $Uninstall.IsPresent
 if (-not $preOk) {
+    $dirty = $true
     if ($Check) { exit 1 }
     if (-not $Force) { exit 1 }
-    Write-Host "-Force: seguindo mesmo com preflight falho."
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        Write-Error "-Force não dispensa Node (preciso dele para mesclar o TOML)."
+        exit 1
+    }
+    Write-Host "-Force: gravando arquivos mesmo com preflight falho."
     Write-Host ""
 }
 
@@ -269,18 +207,29 @@ if ($Check) {
     exit 0
 }
 
+$mergeArgs = @($Merger)
+if ($Uninstall) { $mergeArgs += "--uninstall" }
+if (Test-Path -LiteralPath $config) { $mergeArgs += $config }
+$merged = if (Test-Path -LiteralPath $config) {
+    & node @mergeArgs | Out-String
+}
+else {
+    "" | & node $Merger | Out-String
+}
+$tmp = [System.IO.Path]::GetTempFileName()
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText($tmp, $merged, $utf8NoBom)
+$newText = [System.IO.File]::ReadAllText($tmp)
 $original = ""
 if (Test-Path -LiteralPath $config) {
     $original = [System.IO.File]::ReadAllText($config)
 }
-
-$newText = Merge-Config $original $Uninstall.IsPresent
 $configChanged = $original -ne $newText
 
 if ($configChanged) {
-    Write-Host "--- preview config.toml ---"
-    Write-Host $newText
-    Write-Host "--------------------------"
+    Write-Host "--- bloco chrome-devtools (não dumpa o resto do config) ---"
+    & node $Merger --print-block
+    Write-Host "----------------------------------------------------------------"
     Write-Host ""
 }
 
@@ -288,11 +237,12 @@ if ($Uninstall) {
     Write-Host "Skill a remover: $skillDst"
 }
 else {
-    Write-Host "Skill a copiar: $SkillSrc -> $skillDst"
+    Write-Host "Skill: $SkillSrc -> $skillDst"
 }
 Write-Host ""
 
 if ($DryRun) {
+    Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
     Write-Host "Dry-run: nenhuma escrita."
     exit 0
 }
@@ -301,44 +251,64 @@ New-Item -ItemType Directory -Force -Path $grokHome | Out-Null
 if ($configChanged) {
     if (Test-Path -LiteralPath $config) {
         $stamp = Get-Date -Format "yyyyMMddHHmmss"
-        $bak = "$config.bak.$stamp"
-        Copy-Item -LiteralPath $config -Destination $bak
-        Write-Host "Backup: $bak"
+        Copy-Item -LiteralPath $config -Destination "$config.bak.$stamp"
+        Write-Host "Backup: $config.bak.$stamp"
     }
-    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-    [System.IO.File]::WriteAllText($config, $newText, $utf8NoBom)
+    Copy-Item -LiteralPath $tmp -Destination $config -Force
     Write-Host "Gravado: $config"
 }
 else {
     Write-Host "config.toml já estava no estado pedido."
 }
+Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
 
 if ($Uninstall) {
     if (Test-Path -LiteralPath $skillDst) {
         Remove-Item -LiteralPath $skillDst -Recurse -Force
         Write-Host "Skill removida: $skillDst"
     }
-    Write-Host "Reinicie o Grok (ou /mcps -> r)."
+    Write-Host "Reinicie o Grok (MCP: /mcps -> r)."
     exit 0
 }
 
 $skillsRoot = Join-Path $grokHome "skills"
 New-Item -ItemType Directory -Force -Path $skillsRoot | Out-Null
-if (Test-Path -LiteralPath $skillDst) {
-    Remove-Item -LiteralPath $skillDst -Recurse -Force
+$srcSkill = Join-Path $SkillSrc "SKILL.md"
+$dstSkill = Join-Path $skillDst "SKILL.md"
+$skillSame = $false
+if ((Test-Path -LiteralPath $srcSkill) -and (Test-Path -LiteralPath $dstSkill)) {
+    $skillSame = (Get-FileHash $srcSkill).Hash -eq (Get-FileHash $dstSkill).Hash
 }
-Copy-Item -LiteralPath $SkillSrc -Destination $skillDst -Recurse
-Write-Host "Skill gravada: $(Join-Path $skillDst 'SKILL.md')"
+if ($skillSame) {
+    Write-Host "Skill já estava atualizada."
+}
+else {
+    if (Test-Path -LiteralPath $dstSkill) {
+        $stamp = Get-Date -Format "yyyyMMddHHmmss"
+        Copy-Item -LiteralPath $dstSkill -Destination "$dstSkill.bak.$stamp"
+    }
+    if (Test-Path -LiteralPath $skillDst) {
+        Remove-Item -LiteralPath $skillDst -Recurse -Force
+    }
+    Copy-Item -LiteralPath $SkillSrc -Destination $skillDst -Recurse
+    Write-Host "Skill gravada: $dstSkill"
+}
 Write-Host ""
 
 @"
-Próximos passos (--autoConnect):
-  1. Chrome $MinChromeMajor+ aberto, poucas abas.
-  2. chrome://inspect/#remote-debugging -> ligar Remote Debugging.
-  3. Primeira tool do Grok -> Allow.
-  4. Reiniciar o Grok, ou /mcps -> r.
+Privacidade: --autoConnect vê o Chrome da sua vida. Tool results vão para a API xAI.
+Feche banco/e-mail/gov se não forem o alvo.
 
-Camadas instaladas: flags MCP (config.toml) + playbook do agente (skill).
-O Grok no Windows resolve npx.cmd via PATHEXT; command = "npx" está correto.
+Próximos passos:
+  1. Chrome $MinChromeMajor+ aberto, poucas abas (nunca feche a última).
+  2. chrome://inspect/#remote-debugging -> Remote Debugging.
+  3. Primeira tool -> Allow (de novo após /mcps r).
+  4. Restart do Grok. /mcps r recarrega MCP, não a skill já injetada neste turno.
 "@
+
+if ($dirty) {
+    Write-Host ""
+    Write-Host "INSTALOU ARQUIVOS; MCP NÃO VALIDADO (preflight falhou; -Force)."
+    exit 1
+}
 exit 0
